@@ -1,0 +1,6 @@
+@SaHaBaHealth.Api_HostAddress = http://localhost:5188
+
+GET {{SaHaBaHealth.Api_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
