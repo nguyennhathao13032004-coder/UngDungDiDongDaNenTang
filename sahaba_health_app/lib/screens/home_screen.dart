@@ -7,6 +7,7 @@ import 'package:google_generative_ai/google_generative_ai.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:image_picker/image_picker.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
+import 'ai_chat_screen.dart';
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
@@ -918,22 +919,9 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // --- TAB 2: TRỢ LÝ ẢO AI ---
+    // --- TAB 2: TRỢ LÝ ẢO AI ---
   Widget _buildAIAssistantScreen() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.smart_toy_outlined, size: 80, color: Colors.teal.shade200),
-          const SizedBox(height: 16),
-          const Text(
-            'Trợ lý ảo tư vấn sức khỏe AI\n(Sẽ tích hợp Gemini API vào đây)',
-            textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 16, color: Colors.grey),
-          ),
-        ],
-      ),
-    );
+    return const AiChatScreen();
   }
 
   // --- TAB 3: HỒ SƠ & ĐĂNG XUẤT ---

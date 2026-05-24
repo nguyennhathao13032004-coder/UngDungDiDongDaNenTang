@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'screens/splash_screen.dart';
+import 'screens/ai_chat_screen.dart';
 Future<void> main() async {
   // Đảm bảo các widget của Flutter được khởi tạo trước khi gọi Supabase
   WidgetsFlutterBinding.ensureInitialized();
