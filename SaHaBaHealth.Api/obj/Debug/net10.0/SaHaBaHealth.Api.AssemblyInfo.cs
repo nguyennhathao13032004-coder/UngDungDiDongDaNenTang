@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("SaHaBaHealth.Api")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+e97e15066aa0161a0323bf78650baeb8d80253be")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+8b5bdfd229f48afab8be52a3d5930d262842f1cd")]
 [assembly: System.Reflection.AssemblyProductAttribute("SaHaBaHealth.Api")]
 [assembly: System.Reflection.AssemblyTitleAttribute("SaHaBaHealth.Api")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
