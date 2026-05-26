@@ -1,10 +1,10 @@
 import 'dart:convert';
 import 'package:google_generative_ai/google_generative_ai.dart';
 import '../models/daily_health_report_model.dart';
-
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 class AiService {
   // Thay API Key của bạn vào đây
-  static const String _apiKey = "AIzaSyB3iFI6m5Bix8zMPoO5PGv8L-efAz2In0M"; 
+  static String get _apiKey => dotenv.env['GEMINI_API_KEY'] ?? ''; 
 
   static Future<String> generateHealthAssessment(DailyHealthReport report) async {
     try {

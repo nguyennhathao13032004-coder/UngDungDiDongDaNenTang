@@ -18,9 +18,9 @@ class _AiChatScreenState extends State<AiChatScreen> {
   String? _userId;
   String _userContext = ''; // Context dữ liệu người dùng
 
-  static const String _aiBaseUrl = 'http://localhost:8000';
+  static const String _aiBaseUrl = 'http://10.0.2.2:8000';
   static const String _apiBaseUrl =
-      'http://localhost:5188'; // ASP.NET Core - đổi IP nếu test Android
+      'http://10.0.2.2:5188'; // ASP.NET Core - đổi IP nếu test Android
 
   @override
   void initState() {

@@ -66,8 +66,7 @@ namespace SaHaBaHealth.Api.Controllers
         }
 
         // 4. PUT: api/MedicationSchedules/5
-        // Cập nhật lịch (Ví dụ: Khi user bấm tick "Đã uống" trên app)
-        [HttpPut("{id}")]
+       [HttpPut("{id}")]
         public async Task<IActionResult> PutMedicationSchedule(int id, MedicationSchedule medicationSchedule)
         {
             if (id != medicationSchedule.Id)
@@ -75,10 +74,19 @@ namespace SaHaBaHealth.Api.Controllers
                 return BadRequest("ID không trùng khớp.");
             }
 
-            _context.Entry(medicationSchedule).State = EntityState.Modified;
+            // 1. TÌM LẠI VIÊN THUỐC CŨ TRONG DATABASE
+            var existingMed = await _context.MedicationSchedules.FindAsync(id);
+            if (existingMed == null)
+            {
+                return NotFound("Không tìm thấy viên thuốc này.");
+            }
+
+            // 2. CHỈ CẬP NHẬT ĐÚNG TRẠNG THÁI UỐNG THUỐC (Bảo toàn UserId và mọi thứ khác)
+            existingMed.IsTaken = medicationSchedule.IsTaken;
 
             try
             {
+                // Lưu lại thay đổi
                 await _context.SaveChangesAsync();
             }
             catch (DbUpdateConcurrencyException)
@@ -93,9 +101,9 @@ namespace SaHaBaHealth.Api.Controllers
                 }
             }
 
-            return NoContent(); // Thành công nhưng không cần trả về data (Mã 204)
+            return NoContent(); 
         }
-
+        
         // 5. DELETE: api/MedicationSchedules/5
         // Xóa một lịch uống thuốc
         [HttpDelete("{id}")]
@@ -112,10 +120,52 @@ namespace SaHaBaHealth.Api.Controllers
 
             return NoContent();
         }
+        // 6. GET: api/MedicationSchedules/User/{userId}/AiReport/{date}
+        // API phục vụ cho Bác sĩ AI gom dữ liệu đánh giá
+        [HttpGet("User/{userId}/AiReport/{date}")]
+        public async Task<ActionResult<DailyHealthReport>> GetAiReport(string userId, string date)
+        {
+            // 1. Ép chuỗi String thành kiểu DateOnly TRƯỚC KHI gọi Database
+            if (!DateOnly.TryParse(date, out DateOnly parsedDate))
+            {
+                return BadRequest("Định dạng ngày không hợp lệ.");
+            }
 
+            // 2. Tìm dữ liệu sức khỏe (KHÔNG dùng ToString() ở đây nữa, so sánh trực tiếp DateOnly)
+            var metrics = await _context.DailyHealthMetrics
+                .FirstOrDefaultAsync(m => m.UserId == userId && m.Date == parsedDate);
+
+            // ... (Phần code dưới giữ nguyên y hệt lúc nãy) ...
+            var report = new DailyHealthReport
+            {
+                HeartRate = metrics?.HeartRate ?? 0,
+                BloodPressure = metrics?.BloodPressure ?? "0/0",
+                Weight = metrics?.Weight ?? 0,
+                WaterIntakeMl = metrics?.WaterIntakeMl ?? 0,
+                TargetWaterMl = metrics?.TargetWaterMl ?? 2000,
+                Date = date,
+                TakenMedicines = new List<string>(),
+                MissedMedicines = new List<string>()
+            };
+
+            if (Guid.TryParse(userId, out Guid userGuid))
+            {
+                var medicines = await _context.MedicationSchedules
+                    .Where(m => m.UserId == userGuid)
+                    .ToListAsync();
+
+                report.TakenMedicines = medicines.Where(m => m.IsTaken).Select(m => m.MedicineName).ToList();
+                report.MissedMedicines = medicines.Where(m => !m.IsTaken).Select(m => m.MedicineName).ToList();
+            }
+
+            return Ok(report);
+        }
+        
         private bool MedicationScheduleExists(int id)
         {
             return _context.MedicationSchedules.Any(e => e.Id == id);
         }
+
+        
     }
 }

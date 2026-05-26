@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:sahaba_health_app/screens/ai_chat_screen.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:http/http.dart' as http;
 import 'login_screen.dart';
@@ -12,6 +13,7 @@ import 'water_notification_screen.dart';
 import 'package:sahaba_health_app/services/notification_service.dart';
 import 'ai_service.dart'; 
 import '../models/daily_health_report_model.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
@@ -60,51 +62,77 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       final userId = supabase.auth.currentUser!.id;
       
-      // Thay dòng DateTime.now() cũ bằng dòng này:
-      final String selectedDateString = _selectedDate.toIso8601String().split('T')[0]; 
-      
-      // Đổi $today thành $selectedDateString ở cuối link URL:
-      final url = Uri.parse('http://10.0.2.2:5188/api/MedicationSchedules/User/$userId/Date/$selectedDateString');
+      final url = Uri.parse('http://10.0.2.2:5188/api/MedicationSchedules/User/$userId');
       
       final response = await http.get(url);
       
       if (response.statusCode == 200) {
+        // Ép kiểu an toàn từ dữ liệu JSON
+        List<dynamic> responseData = json.decode(response.body);
+        List<Map<String, dynamic>> allMedications = List<Map<String, dynamic>>.from(responseData);
+        
+        // 🚨 DÒNG PRINT NÀY SẼ CHỈ ĐIỂM CHÍNH XÁC CẤU TRÚC JSON TỪ C#
+        if (allMedications.isNotEmpty) {
+           print('--- 🚨 DỮ LIỆU C# TRẢ VỀ CỦA 1 VIÊN THUỐC: ${allMedications[0]}');
+        }
+
+        final String selectedDateString = _selectedDate.toIso8601String().split('T')[0];
+
         setState(() {
-          _medications = List<Map<String, dynamic>>.from(json.decode(response.body));
+          _medications = allMedications.where((m) {
+            // Lấy đúng cột createdAt chứa ngày tháng để so sánh
+            String thuocDate = m['createdAt']?.toString() ?? ''; 
+                               
+            return thuocDate.startsWith(selectedDateString);
+          }).toList();
         });
+        
+        print('--- ✅ Đã lọc xong: Còn ${_medications.length} viên thuốc cho ngày $selectedDateString');
+        
+      } else {
+        print('--- ❌ Lỗi Backend: Code ${response.statusCode}');
       }
     } catch (e) {
-      print('Lỗi kết nối mạng: $e');
+      print('❌ Lỗi kết nối mạng: $e');
     }
   }
 
   // 1. Hàm chính: Kéo data và gọi AI
   Future<void> _fetchAndShowAiAssessment() async {
+    print('--- 🚀 BẮT ĐẦU GỌI BÁC SĨ AI ---');
     _showLoadingDialog(); 
+    
     try {
       final userId = supabase.auth.currentUser!.id;
       final String dateStr = _selectedDate.toIso8601String().split('T')[0];
       
       final url = Uri.parse('http://10.0.2.2:5188/api/MedicationSchedules/User/$userId/AiReport/$dateStr');
+      print('--- 🌐 1. Đang gọi C# qua link: $url');
+      
       final response = await http.get(url);
+      print('--- 📥 2. C# trả về mã: ${response.statusCode}');
       
       if (response.statusCode == 200) {
-        Navigator.pop(context); // Tắt loading
-        
         final Map<String, dynamic> jsonData = json.decode(response.body);
         final reportData = DailyHealthReport.fromJson(jsonData);
         
-        // Nhớ import AiService ở đầu file nhé
+        print('--- ✅ 3. Dữ liệu C# ngon lành. Đang gọi AI Gemini...');
         final String aiResultMarkdown = await AiService.generateHealthAssessment(reportData);
         
+        Navigator.pop(context); // Tắt loading
+        print('--- 🎉 4. AI trả lời xong!');
         _showAiResultBottomSheet(aiResultMarkdown);
       } else {
         Navigator.pop(context);
+        // IN LỖI C# RA TERMINAL
+        print('--- ❌ LỖI API C#: Code ${response.statusCode} - Nội dung: ${response.body}');
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Lỗi API: ${response.statusCode}")));
       }
     } catch (e) {
       Navigator.pop(context);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Lỗi kết nối AI: $e")));
+      // IN LỖI MẠNG RA TERMINAL
+      print('--- 🚨 LỖI SẬP NGUỒN HOẶC LỖI MẠNG: $e');
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Lỗi kết nối: $e")));
     }
   }
 
@@ -145,6 +173,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _fetchHealthMetrics() async {
     try {
       final userId = supabase.auth.currentUser!.id;
+      // Đổi từ localhost thành 10.0.2.2
       final url = Uri.parse('http://10.0.2.2:5188/api/DailyHealthMetrics/User/$userId/Today');
       final response = await http.get(url);
       if (response.statusCode == 200) {
@@ -324,7 +353,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _analyzeVitalsWithAI(int hr, String bp, double weight) async {
     showDialog(context: context, barrierDismissible: false, builder: (context) => const Center(child: CircularProgressIndicator(color: Colors.teal)));
     try {
-      final apiKey = 'AIzaSyCTY0lNSxvukbDpjDpm0pr0gpVtPcSWHkA';
+      final apiKey = dotenv.env['GEMINI_API_KEY'] ?? '';
       final model = GenerativeModel(model: 'gemini-2.5-flash', apiKey: apiKey);
       final prompt = '''
       Tôi là người dùng ứng dụng chăm sóc sức khỏe. Tôi vừa đo các chỉ số sinh hiệu hôm nay:
@@ -359,7 +388,8 @@ class _HomeScreenState extends State<HomeScreen> {
       final userId = supabase.auth.currentUser!.id;
       final timeString = '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}:00';
       final url = Uri.parse('http://10.0.2.2:5188/api/MedicationSchedules');
-      
+      // THÊM 1 DÒNG NÀY ĐỂ XEM LINK GỌI ĐÃ ĐÚNG CHƯA:
+      print('--- Đang gọi API lấy thuốc: $url');
       final response = await http.post(url,
         headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
         body: json.encode({"userId": userId, "medicineName": name, "dosage": dosage, "timeToTake": timeString, "isTaken": false}),
@@ -371,6 +401,7 @@ class _HomeScreenState extends State<HomeScreen> {
         
         if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Đã thêm lịch uống thuốc!'), backgroundColor: Colors.green));
       }
+      
     } catch (e) { 
         print('Lỗi mạng khi thêm thuốc: $e'); 
     }
@@ -604,53 +635,41 @@ void _showEditBottomSheet(Map<String, dynamic> med) {
 }
 
  Future<void> _updateMedicationStatus(Map<String, dynamic> med, bool isTaken) async {
-    try {
-      // 1. Lấy ngày (Dùng _selectedDate nếu bạn đã thêm thanh chọn ngày, nếu chưa thì dùng DateTime.now())
-      // Tương tự, thay dòng DateTime.now() bằng dòng này:
-      final String selectedDateString = _selectedDate.toIso8601String().split('T')[0];
-      
-      final url = Uri.parse('http://10.0.2.2:5188/api/MedicationSchedules/ToggleLog');
-      
-      final response = await http.post(
-        url,
-        headers: {'Content-Type': 'application/json'},
-        body: json.encode({
-          'scheduleId': med['id'], 
-          'date': selectedDateString, // Truyền ngày đang chọn lên Server
-          'isTaken': isTaken       
-        }),
-      );
-
-      // 2. NẾU SERVER TỪ CHỐI (LỖI)
-      if (response.statusCode != 200) {
-        // Nhả tick lại như cũ
-        setState(() {
-           med['isTaken'] = !isTaken;
-        });
-        
-        // HIỆN BẢNG ĐỎ CHÓT LÊN MÀN HÌNH ĐỂ XEM LỖI GÌ
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('❌ Lỗi C#: ${response.statusCode} - ${response.body}'), 
-              backgroundColor: Colors.red,
-              duration: const Duration(seconds: 5), // Hiện 5 giây cho dễ đọc
-            ),
-          );
-        }
-      }
-    } catch (e) {
-      // Nếu mất mạng hoặc sập server
-      setState(() {
-         med['isTaken'] = !isTaken;
-      });
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('❌ Lỗi kết nối: $e'), backgroundColor: Colors.red),
-        );
-      }
-    }
+  // 1. Tạo bản sao dữ liệu để đảm bảo không thiếu trường nào
+  final Map<String, dynamic> updatedMed = Map<String, dynamic>.from(med);
+  
+  // 2. Gán giá trị mới
+  updatedMed['isTaken'] = isTaken;
+  
+  // 3. Đảm bảo userId phải luôn tồn tại (lấy từ dữ liệu gốc hoặc từ supabase)
+  if (updatedMed['userId'] == null || updatedMed['userId'] == '00000000-0000-0000-0000-000000000000') {
+     updatedMed['userId'] = supabase.auth.currentUser!.id;
   }
+
+  // 4. Debug: In ra để kiểm tra 100% trước khi gửi
+  print("--- 🚀 Payload đang gửi lên: $updatedMed");
+
+  try {
+    final url = Uri.parse('http://10.0.2.2:5188/api/MedicationSchedules/${med['id']}');
+    
+    final response = await http.put(
+      url,
+      headers: {'Content-Type': 'application/json'},
+      body: json.encode(updatedMed), // Gửi cả cục dữ liệu đã có userId
+    );
+
+    if (response.statusCode == 200 || response.statusCode == 204) {
+      // Thành công thì cập nhật giao diện
+      setState(() {
+        med['isTaken'] = isTaken;
+      });
+    } else {
+      print("--- ❌ Lỗi server: ${response.body}");
+    }
+  } catch (e) {
+    print("--- ❌ Lỗi mạng: $e");
+  }
+}
 
   void _onItemTapped(int index) => setState(() => _selectedIndex = index);
 
@@ -861,6 +880,7 @@ void _showEditBottomSheet(Map<String, dynamic> med) {
                     'Bác sĩ AI đánh giá ngày này', 
                     style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)
                   ),
+                  
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.teal,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -945,13 +965,9 @@ void _showEditBottomSheet(Map<String, dynamic> med) {
   }
 
   // --- TAB 2: TRỢ LÝ AI ---
-  Widget _buildAIAssistantScreen() {
-    return Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-      Icon(Icons.smart_toy_outlined, size: 80, color: Colors.teal.shade200),
-      const SizedBox(height: 16),
-      const Text('Trợ lý ảo tư vấn sức khỏe AI\n(Sẽ tích hợp Gemini API vào đây)', textAlign: TextAlign.center, style: TextStyle(fontSize: 16, color: Colors.grey)),
-    ]));
-  }
+ Widget _buildAIAssistantScreen() {
+   return const AiChatScreen(); 
+ }
 
   // --- TAB 5: HỒ SƠ ---
   Widget _buildProfileScreen() {

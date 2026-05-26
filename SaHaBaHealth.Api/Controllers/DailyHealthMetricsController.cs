@@ -69,5 +69,39 @@ namespace SaHaBaHealth.Api.Controllers
             await _context.SaveChangesAsync();
             return Ok(metric);
         }
+        // API phục vụ cho Bác sĩ AI
+        [HttpGet("User/{userId}/AiReport/{date}")]
+        public async Task<ActionResult<DailyHealthReport>> GetAiReport(Guid userId, string date)
+        {
+            // 1. Lấy dữ liệu sức khỏe (cần gọi sang bảng DailyHealthMetrics)
+            // Lưu ý: Nếu UserId bên bảng DailyHealthMetrics là string, bạn cần ép kiểu ToString()
+            var metrics = await _context.DailyHealthMetrics
+                .FirstOrDefaultAsync(m => m.UserId == userId.ToString() && m.Date.ToString() == date);
+
+            // Nếu chưa có dữ liệu sức khỏe, ta vẫn trả về report với thông số 0 để AI không bị lỗi
+            var report = new DailyHealthReport
+            {
+                HeartRate = metrics?.HeartRate ?? 0,
+                BloodPressure = metrics?.BloodPressure ?? "0/0",
+                Weight = metrics?.Weight ?? 0,
+                WaterIntakeMl = metrics?.WaterIntakeMl ?? 0,
+                TargetWaterMl = metrics?.TargetWaterMl ?? 2000,
+                Date = date, // Dùng ngày từ URL
+                TakenMedicines = new List<string>(),
+                MissedMedicines = new List<string>()
+            };
+
+            // 2. Lấy dữ liệu thuốc
+            var medicines = await _context.MedicationSchedules
+                .Where(m => m.UserId == userId)
+                .ToListAsync();
+
+            // 3. Phân loại thuốc
+            // Giả sử cột 'IsTaken' là bool
+            report.TakenMedicines = medicines.Where(m => m.IsTaken).Select(m => m.MedicineName).ToList();
+            report.MissedMedicines = medicines.Where(m => !m.IsTaken).Select(m => m.MedicineName).ToList();
+
+            return Ok(report);
+        }
     }
 }

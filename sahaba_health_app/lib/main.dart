@@ -6,7 +6,7 @@ import 'package:sahaba_health_app/services/notification_service.dart';
 // Import 2 thư viện timezone để xử lý múi giờ
 import 'package:timezone/data/latest_all.dart' as tz;
 import 'package:timezone/timezone.dart' as tz; 
-
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
