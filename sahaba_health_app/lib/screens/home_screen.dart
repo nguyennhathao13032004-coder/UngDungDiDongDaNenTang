@@ -9,7 +9,9 @@ import 'package:image_picker/image_picker.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'bmi_screen.dart';
 import 'water_notification_screen.dart';
-
+import 'package:sahaba_health_app/services/notification_service.dart';
+import 'ai_service.dart'; 
+import '../models/daily_health_report_model.dart';
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
@@ -21,6 +23,8 @@ class _HomeScreenState extends State<HomeScreen> {
   int _selectedIndex = 0;
   final supabase = Supabase.instance.client;
   List<dynamic> _medications = [];
+  // Thêm biến này để lưu ngày người dùng đang xem (Mặc định là hôm nay)
+  DateTime _selectedDate = DateTime.now();
   Map<String, dynamic>? _healthMetric;
   bool _isLoading = true;
   String _userName = '';
@@ -52,17 +56,90 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() => _isLoading = false);
   }
 
-  Future<void> _fetchMedications() async {
+ Future<void> _fetchMedications() async {
     try {
       final userId = supabase.auth.currentUser!.id;
-      final url = Uri.parse('http://10.0.2.2:5188/api/MedicationSchedules/User/$userId');
+      
+      // Thay dòng DateTime.now() cũ bằng dòng này:
+      final String selectedDateString = _selectedDate.toIso8601String().split('T')[0]; 
+      
+      // Đổi $today thành $selectedDateString ở cuối link URL:
+      final url = Uri.parse('http://10.0.2.2:5188/api/MedicationSchedules/User/$userId/Date/$selectedDateString');
+      
       final response = await http.get(url);
+      
       if (response.statusCode == 200) {
-        _medications = json.decode(response.body);
+        setState(() {
+          _medications = List<Map<String, dynamic>>.from(json.decode(response.body));
+        });
       }
     } catch (e) {
       print('Lỗi kết nối mạng: $e');
     }
+  }
+
+  // 1. Hàm chính: Kéo data và gọi AI
+  Future<void> _fetchAndShowAiAssessment() async {
+    _showLoadingDialog(); 
+    try {
+      final userId = supabase.auth.currentUser!.id;
+      final String dateStr = _selectedDate.toIso8601String().split('T')[0];
+      
+      final url = Uri.parse('http://10.0.2.2:5188/api/MedicationSchedules/User/$userId/AiReport/$dateStr');
+      final response = await http.get(url);
+      
+      if (response.statusCode == 200) {
+        Navigator.pop(context); // Tắt loading
+        
+        final Map<String, dynamic> jsonData = json.decode(response.body);
+        final reportData = DailyHealthReport.fromJson(jsonData);
+        
+        // Nhớ import AiService ở đầu file nhé
+        final String aiResultMarkdown = await AiService.generateHealthAssessment(reportData);
+        
+        _showAiResultBottomSheet(aiResultMarkdown);
+      } else {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Lỗi API: ${response.statusCode}")));
+      }
+    } catch (e) {
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Lỗi kết nối AI: $e")));
+    }
+  }
+
+  // 2. Hàm phụ: Hiển thị vòng xoay chờ đợi
+  void _showLoadingDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: false, // Không cho bấm ra ngoài để tắt
+      builder: (context) => const Center(
+        child: CircularProgressIndicator(color: Colors.teal),
+      ),
+    );
+  }
+
+  // 3. Hàm phụ: Hiển thị kết quả AI (Dùng Markdown cho đẹp)
+  void _showAiResultBottomSheet(String text) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (context) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.6, // Chiều cao mặc định 60% màn hình
+        maxChildSize: 0.9,   // Kéo lên tối đa 90%
+        builder: (_, controller) => Padding(
+          padding: const EdgeInsets.all(20.0),
+          child: SingleChildScrollView(
+            controller: controller,
+            // Nếu bạn chưa cài package flutter_markdown, thì dùng Text tạm thời như này:
+            child: Text(text, style: const TextStyle(fontSize: 16, height: 1.5)),
+          ),
+        ),
+      ),
+    );
   }
 
   Future<void> _fetchHealthMetrics() async {
@@ -282,78 +359,297 @@ class _HomeScreenState extends State<HomeScreen> {
       final userId = supabase.auth.currentUser!.id;
       final timeString = '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}:00';
       final url = Uri.parse('http://10.0.2.2:5188/api/MedicationSchedules');
+      
       final response = await http.post(url,
         headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
         body: json.encode({"userId": userId, "medicineName": name, "dosage": dosage, "timeToTake": timeString, "isTaken": false}),
       );
-      if (response.statusCode == 201) {
-        _fetchMedications();
+      
+      if (response.statusCode == 201 || response.statusCode == 200) {
+        // THÊM CHỮ 'await' VÀO ĐÂY:
+        await _fetchMedications(); 
+        
         if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Đã thêm lịch uống thuốc!'), backgroundColor: Colors.green));
       }
-    } catch (e) { print('Lỗi mạng khi thêm thuốc: $e'); }
-  }
+    } catch (e) { 
+        print('Lỗi mạng khi thêm thuốc: $e'); 
+    }
+}
 
   void _showAddBottomSheet() {
-    final nameController = TextEditingController();
-    final dosageController = TextEditingController();
-    TimeOfDay selectedTime = TimeOfDay.now();
-    showModalBottomSheet(
-      context: context, isScrollControlled: true, backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-      builder: (context) {
-        return StatefulBuilder(builder: (context, setModalState) {
-          return Padding(
-            padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom, left: 24, right: 24, top: 24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('Thêm lịch uống thuốc', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 20),
-                TextField(controller: nameController, decoration: InputDecoration(labelText: 'Tên thuốc', prefixIcon: const Icon(Icons.medication), border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)))),
-                const SizedBox(height: 16),
-                TextField(controller: dosageController, decoration: InputDecoration(labelText: 'Liều lượng (VD: 2 viên, 1 gói...)', prefixIcon: const Icon(Icons.monitor_weight_outlined), border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)))),
-                const SizedBox(height: 16),
-                ListTile(
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: Colors.grey.shade400)),
-                  leading: const Icon(Icons.access_time, color: Colors.teal),
-                  title: const Text('Giờ uống thuốc'),
-                  trailing: Text('${selectedTime.hour.toString().padLeft(2, '0')}:${selectedTime.minute.toString().padLeft(2, '0')}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.teal)),
-                  onTap: () async {
-                    final t = await showTimePicker(context: context, initialTime: selectedTime);
-                    if (t != null) setModalState(() => selectedTime = t);
-                  },
-                ),
-                const SizedBox(height: 24),
-                SizedBox(
-                  width: double.infinity, height: 50,
-                  child: ElevatedButton(
-                    onPressed: () {
-                      if (nameController.text.isNotEmpty && dosageController.text.isNotEmpty) {
-                        _addMedication(nameController.text, dosageController.text, selectedTime);
-                        Navigator.pop(context);
+  final nameController = TextEditingController();
+  final dosageController = TextEditingController();
+  TimeOfDay selectedTime = TimeOfDay.now();
+  
+  showModalBottomSheet(
+    context: context, isScrollControlled: true, backgroundColor: Colors.white,
+    shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+    builder: (context) {
+      return StatefulBuilder(builder: (context, setModalState) {
+        return Padding(
+          padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom, left: 24, right: 24, top: 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Thêm lịch uống thuốc', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 20),
+              TextField(controller: nameController, decoration: InputDecoration(labelText: 'Tên thuốc', prefixIcon: const Icon(Icons.medication), border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)))),
+              const SizedBox(height: 16),
+              TextField(controller: dosageController, decoration: InputDecoration(labelText: 'Liều lượng (VD: 2 viên, 1 gói...)', prefixIcon: const Icon(Icons.monitor_weight_outlined), border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)))),
+              const SizedBox(height: 16),
+              ListTile(
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: Colors.grey.shade400)),
+                leading: const Icon(Icons.access_time, color: Colors.teal),
+                title: const Text('Giờ uống thuốc'),
+                trailing: Text('${selectedTime.hour.toString().padLeft(2, '0')}:${selectedTime.minute.toString().padLeft(2, '0')}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.teal)),
+                onTap: () async {
+                  final t = await showTimePicker(context: context, initialTime: selectedTime);
+                  if (t != null) setModalState(() => selectedTime = t);
+                },
+              ),
+              const SizedBox(height: 24),
+              SizedBox(
+                width: double.infinity, height: 50,
+                child: ElevatedButton(
+                  onPressed: () async {
+                    if (nameController.text.isNotEmpty && dosageController.text.isNotEmpty) {
+                      
+                      // 1. ĐÓNG BẢNG NGAY LẬP TỨC ĐỂ CHỐNG BẤM ĐÚP
+                      Navigator.pop(context);
+                      
+                      // 2. GỌI API LƯU THUỐC (Chỉ gọi đúng 1 lần duy nhất)
+                      await _addMedication(nameController.text, dosageController.text, selectedTime);
+                      
+                      // 3. TẠO ID & LÊN LỊCH BÁO THỨC CHẠY NGẦM
+                      int notifId = DateTime.now().millisecondsSinceEpoch.remainder(100000);
+                      await NotificationService.scheduleMedicationNotification(
+                        id: 1000 + notifId, // Cộng 1000 để tách biệt với nhắc nước
+                        pillName: nameController.text,
+                        dosage: dosageController.text,
+                        hour: selectedTime.hour,
+                        minute: selectedTime.minute,
+                      );
+                      // 4. HIỆN THÔNG BÁO THÀNH CÔNG (Đã xóa lệnh pop bị thừa)
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('✅ Đã hẹn giờ uống ${nameController.text} lúc ${selectedTime.format(context)}'),
+                            backgroundColor: Colors.teal, 
+                          ),
+                        );
                       }
-                    },
-                    style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
-                    child: const Text('Lưu lịch', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                  ),
+                    }
+                  },
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+                  child: const Text('Lưu lịch', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                 ),
-                const SizedBox(height: 24),
-              ],
+              ),
+              const SizedBox(height: 24),
+            ],
+          ),
+        );
+      });
+    },
+  );
+}
+
+
+// Hàm mở bảng Sửa/Xóa
+void _showEditBottomSheet(Map<String, dynamic> med) {
+  // 1. Tách chuỗi giờ từ Database (VD: "20:30:00" -> TimeOfDay)
+  final timeParts = med['timeToTake'].toString().split(':');
+  TimeOfDay selectedTime = TimeOfDay(
+    hour: int.parse(timeParts[0]), 
+    minute: int.parse(timeParts[1])
+  );
+
+  final nameController = TextEditingController(text: med['medicineName']);
+  final dosageController = TextEditingController(text: med['dosage']);
+  bool isDeleting = false; // Biến cho nút Xóa
+  bool isUpdating = false; // Biến cho nút Cập nhật
+
+  showModalBottomSheet(
+    context: context, isScrollControlled: true, backgroundColor: Colors.white,
+    shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+    builder: (context) {
+      return StatefulBuilder(builder: (context, setModalState) {
+        return Padding(
+          padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom, left: 24, right: 24, top: 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Thông tin lịch uống thuốc', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 20),
+              TextField(controller: nameController, decoration: InputDecoration(labelText: 'Tên thuốc', prefixIcon: const Icon(Icons.medication), border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)))),
+              const SizedBox(height: 16),
+              TextField(controller: dosageController, decoration: InputDecoration(labelText: 'Liều lượng', prefixIcon: const Icon(Icons.monitor_weight_outlined), border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)))),
+              const SizedBox(height: 16),
+              ListTile(
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: Colors.grey.shade400)),
+                leading: const Icon(Icons.access_time, color: Colors.teal),
+                title: const Text('Giờ uống thuốc'),
+                trailing: Text('${selectedTime.hour.toString().padLeft(2, '0')}:${selectedTime.minute.toString().padLeft(2, '0')}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.teal)),
+                onTap: () async {
+                  final t = await showTimePicker(context: context, initialTime: selectedTime);
+                  if (t != null) setModalState(() => selectedTime = t);
+                },
+              ),
+              const SizedBox(height: 24),
+              Row(
+                children: [
+                  // ===============================
+                  // NÚT XÓA (MÀU ĐỎ)
+                  // ===============================
+                  Expanded(
+                    flex: 1,
+                    child: SizedBox(
+                      height: 50,
+                      child: OutlinedButton(
+                        // Khóa nút nếu 1 trong 2 đang chạy
+                        onPressed: (isDeleting || isUpdating) ? null : () async {
+                          setModalState(() => isDeleting = true); // Đổi thành isDeleting
+                          try {
+                            final url = Uri.parse('http://10.0.2.2:5188/api/MedicationSchedules/${med['id']}');
+                            final response = await http.delete(url);
+                            
+                            if (response.statusCode == 200 || response.statusCode == 204) {
+                              await _fetchMedications(); 
+                              if (context.mounted) {
+                                Navigator.pop(context);
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('🗑️ Đã xóa thuốc!'), backgroundColor: Colors.redAccent),
+                                );
+                              }
+                            }
+                          } catch (e) {
+                            print('Lỗi xóa: $e');
+                          }
+                          setModalState(() => isDeleting = false); // Đổi thành isDeleting
+                        },
+                        style: OutlinedButton.styleFrom(foregroundColor: Colors.red, side: const BorderSide(color: Colors.red), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+                        // Đổi thành isDeleting
+                        child: isDeleting ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.red)) : const Icon(Icons.delete_outline),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  
+                  // ===============================
+                  // NÚT LƯU CẬP NHẬT
+                  // ===============================
+                  Expanded(
+                    flex: 2,
+                    child: SizedBox(
+                      height: 50,
+                      child: ElevatedButton(
+                        // Khóa nút nếu 1 trong 2 đang chạy
+                        onPressed: (isDeleting || isUpdating) ? null : () async {
+                          if (nameController.text.isNotEmpty && dosageController.text.isNotEmpty) {
+                            setModalState(() => isUpdating = true); // Đổi thành isUpdating
+                            try {
+                              final timeString = '${selectedTime.hour.toString().padLeft(2, '0')}:${selectedTime.minute.toString().padLeft(2, '0')}:00';
+                              final url = Uri.parse('http://10.0.2.2:5188/api/MedicationSchedules/${med['id']}');
+                              
+                              final updatedData = {
+                                'id': med['id'], 
+                                'medicineName': nameController.text,
+                                'dosage': dosageController.text,
+                                'timeToTake': timeString,
+                              };
+
+                              final response = await http.put(url, headers: {'Content-Type': 'application/json'}, body: json.encode(updatedData));
+                              
+                              if (response.statusCode == 200 || response.statusCode == 204) {
+                                int notifId = DateTime.now().millisecondsSinceEpoch.remainder(100000);
+                                await NotificationService.scheduleMedicationNotification(
+                                  id: 1000 + notifId, 
+                                  pillName: nameController.text,
+                                  dosage: dosageController.text,
+                                  hour: selectedTime.hour,
+                                  minute: selectedTime.minute,
+                                );
+
+                                await _fetchMedications(); 
+                                if (context.mounted) {
+                                  Navigator.pop(context);
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('✅ Đã cập nhật thành công!'), backgroundColor: Colors.teal),
+                                  );
+                                }
+                              }
+                            } catch (e) {
+                              print('Lỗi cập nhật: $e');
+                            }
+                            setModalState(() => isUpdating = false); // Đổi thành isUpdating
+                          }
+                        },
+                        style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+                        // Đổi thành isUpdating
+                        child: isUpdating 
+                            ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) 
+                            : const Text('Cập nhật', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              
+              const SizedBox(height: 24),
+            ],
+          ),
+        );
+      });
+    },
+  );
+}
+
+ Future<void> _updateMedicationStatus(Map<String, dynamic> med, bool isTaken) async {
+    try {
+      // 1. Lấy ngày (Dùng _selectedDate nếu bạn đã thêm thanh chọn ngày, nếu chưa thì dùng DateTime.now())
+      // Tương tự, thay dòng DateTime.now() bằng dòng này:
+      final String selectedDateString = _selectedDate.toIso8601String().split('T')[0];
+      
+      final url = Uri.parse('http://10.0.2.2:5188/api/MedicationSchedules/ToggleLog');
+      
+      final response = await http.post(
+        url,
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({
+          'scheduleId': med['id'], 
+          'date': selectedDateString, // Truyền ngày đang chọn lên Server
+          'isTaken': isTaken       
+        }),
+      );
+
+      // 2. NẾU SERVER TỪ CHỐI (LỖI)
+      if (response.statusCode != 200) {
+        // Nhả tick lại như cũ
+        setState(() {
+           med['isTaken'] = !isTaken;
+        });
+        
+        // HIỆN BẢNG ĐỎ CHÓT LÊN MÀN HÌNH ĐỂ XEM LỖI GÌ
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('❌ Lỗi C#: ${response.statusCode} - ${response.body}'), 
+              backgroundColor: Colors.red,
+              duration: const Duration(seconds: 5), // Hiện 5 giây cho dễ đọc
             ),
           );
-        });
-      },
-    );
-  }
-
-  Future<void> _updateMedicationStatus(Map<String, dynamic> med, bool isTaken) async {
-    try {
-      final url = Uri.parse('http://10.0.2.2:5188/api/MedicationSchedules/${med['id']}');
-      final updatedMed = Map<String, dynamic>.from(med);
-      updatedMed['isTaken'] = isTaken;
-      final response = await http.put(url, headers: {'Content-Type': 'application/json'}, body: json.encode(updatedMed));
-      if (response.statusCode != 204) _fetchMedications();
-    } catch (e) { _fetchMedications(); }
+        }
+      }
+    } catch (e) {
+      // Nếu mất mạng hoặc sập server
+      setState(() {
+         med['isTaken'] = !isTaken;
+      });
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('❌ Lỗi kết nối: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
   }
 
   void _onItemTapped(int index) => setState(() => _selectedIndex = index);
@@ -460,51 +756,119 @@ class _HomeScreenState extends State<HomeScreen> {
                   : _medications.isEmpty
                       ? _buildEmptyMedication()
                       : ListView.builder(
-                          shrinkWrap: true,
-                          physics: const NeverScrollableScrollPhysics(),
-                          itemCount: _medications.length,
-                          itemBuilder: (context, index) {
-                            final med = _medications[index];
-                            final timeString = med['timeToTake'].toString().substring(0, 5);
-                            return Card(
-                              elevation: 2,
-                              margin: const EdgeInsets.only(bottom: 12),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                              child: ListTile(
-                                contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-                                leading: Container(
-                                  padding: const EdgeInsets.all(12),
-                                  decoration: BoxDecoration(color: med['isTaken'] ? Colors.green.shade50 : Colors.orange.shade50, borderRadius: BorderRadius.circular(12)),
-                                  child: Icon(Icons.medication, color: med['isTaken'] ? Colors.green : Colors.orange),
-                                ),
-                                title: Text(med['medicineName'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                                subtitle: Padding(
-                                  padding: const EdgeInsets.only(top: 8.0),
-                                  child: Row(children: [
-                                    Icon(Icons.access_time, size: 16, color: Colors.grey.shade600),
-                                    const SizedBox(width: 4),
-                                    Text(timeString, style: TextStyle(color: Colors.grey.shade600)),
-                                    const SizedBox(width: 16),
-                                    Icon(Icons.monitor_weight_outlined, size: 16, color: Colors.grey.shade600),
-                                    const SizedBox(width: 4),
-                                    Text(med['dosage'], style: TextStyle(color: Colors.grey.shade600)),
-                                  ]),
-                                ),
-                                trailing: Checkbox(
-                                  value: med['isTaken'],
-                                  activeColor: Colors.green,
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
-                                  onChanged: (bool? value) {
-                                    if (value != null) {
-                                      setState(() => med['isTaken'] = value);
-                                      _updateMedicationStatus(med, value);
-                                    }
-                                  },
-                                ),
-                              ),
-                            );
-                          },
-                        ),
+                        
+  shrinkWrap: true,
+  physics: const NeverScrollableScrollPhysics(),
+  itemCount: _medications.length,
+  itemBuilder: (context, index) {
+    final med = _medications[index];
+    final timeString = med['timeToTake'].toString().substring(0, 5);
+    
+    return Card(
+      elevation: 2,
+      margin: const EdgeInsets.only(bottom: 12),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: ListTile(
+        // THÊM DÒNG NÀY ĐỂ BẤM VÀO THẺ THUỐC ĐƯỢC:
+        onTap: () => _showEditBottomSheet(med), 
+        
+        contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+        leading: Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(color: med['isTaken'] ? Colors.green.shade50 : Colors.orange.shade50, borderRadius: BorderRadius.circular(12)),
+          child: Icon(Icons.medication, color: med['isTaken'] ? Colors.green : Colors.orange),
+        ),
+        title: Text(med['medicineName'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+        subtitle: Padding(
+          padding: const EdgeInsets.only(top: 8.0),
+          child: Row(children: [
+            Icon(Icons.access_time, size: 16, color: Colors.grey.shade600),
+            const SizedBox(width: 4),
+            Text(timeString, style: TextStyle(color: Colors.grey.shade600)),
+            const SizedBox(width: 16),
+            Icon(Icons.monitor_weight_outlined, size: 16, color: Colors.grey.shade600),
+            const SizedBox(width: 4),
+            Text(med['dosage'], style: TextStyle(color: Colors.grey.shade600)),
+          ]),
+        ),
+        trailing: Checkbox(
+          value: med['isTaken'],
+          activeColor: Colors.green,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+          onChanged: (bool? value) {
+            if (value != null) {
+              setState(() => med['isTaken'] = value);
+              _updateMedicationStatus(med, value);
+            }
+          },
+        ),
+      ),
+    );
+  },
+),
+              // THANH ĐIỀU HƯỚNG CHỌN NGÀY
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8.0),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  // Nút lùi về hôm qua
+                  IconButton(
+                    icon: const Icon(Icons.chevron_left, color: Colors.teal),
+                    onPressed: () {
+                      setState(() {
+                        _selectedDate = _selectedDate.subtract(const Duration(days: 1));
+                      });
+                      _fetchMedications(); // Lấy lại dữ liệu của ngày mới
+                    },
+                  ),
+                  
+                  // Hiển thị ngày đang chọn
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.teal.shade50,
+                      borderRadius: BorderRadius.circular(20)
+                    ),
+                    child: Text(
+                      '${_selectedDate.day.toString().padLeft(2, '0')}/${_selectedDate.month.toString().padLeft(2, '0')}/${_selectedDate.year}',
+                      style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.teal, fontSize: 16),
+                    ),
+                  ),
+                  
+                  // Nút tiến tới ngày mai
+                  IconButton(
+                    icon: const Icon(Icons.chevron_right, color: Colors.teal),
+                    onPressed: () {
+                      setState(() {
+                        _selectedDate = _selectedDate.add(const Duration(days: 1));
+                      });
+                      _fetchMedications(); // Lấy lại dữ liệu của ngày mới
+                    },
+                  ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+              child: SizedBox(
+                width: double.infinity,
+                height: 55,
+                child: ElevatedButton.icon(
+                  onPressed: _fetchAndShowAiAssessment, // Gọi hàm AI khi bấm
+                  icon: const Icon(Icons.smart_toy, color: Colors.white), // Icon Robot
+                  label: const Text(
+                    'Bác sĩ AI đánh giá ngày này', 
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.teal,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                    elevation: 4,
+                  ),
+                ),
+              ),
+            ),
               const SizedBox(height: 80),
             ],
           ),

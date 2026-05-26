@@ -17,6 +17,9 @@ dependencies:
   speech_to_text: ^7.4.0
   image_picker: ^1.2.2
   google_mlkit_text_recognition: ^0.15.1                   # <-- THÊM MỚI
+  shared_preferences: ^2.5.5
+  flutter_local_notifications: ^20.1.0
+  timezone: ^0.10.1
 
 dev_dependencies:
   flutter_test:

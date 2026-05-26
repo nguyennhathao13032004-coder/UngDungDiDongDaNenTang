@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:sahaba_health_app/services/notification_service.dart';
 
 class WaterNotificationScreen extends StatefulWidget {
   const WaterNotificationScreen({super.key});
@@ -12,6 +14,70 @@ class _WaterNotificationScreenState extends State<WaterNotificationScreen> {
   int _intervalHours = 2;
   TimeOfDay _startTime = const TimeOfDay(hour: 7, minute: 0);
   TimeOfDay _endTime = const TimeOfDay(hour: 22, minute: 0);
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSavedSettings(); // Tự động lấy dữ liệu thật từ máy lên khi mở màn hình
+    NotificationService.requestPermission();
+  }
+
+  // Hàm đọc dữ liệu thật từ bộ nhớ SharedPreferences
+  Future<void> _loadSavedSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _isEnabled = prefs.getBool('water_enabled') ?? false;
+      _intervalHours = prefs.getInt('water_interval') ?? 2;
+      
+      final startHour = prefs.getInt('water_start_hour') ?? 7;
+      final startMin = prefs.getInt('water_start_min') ?? 0;
+      _startTime = TimeOfDay(hour: startHour, minute: startMin);
+
+      final endHour = prefs.getInt('water_end_hour') ?? 22;
+      final endMin = prefs.getInt('water_end_min') ?? 0;
+      _endTime = TimeOfDay(hour: endHour, minute: endMin);
+    });
+  }
+
+  Future<void> _saveSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('water_enabled', _isEnabled);
+    await prefs.setInt('water_interval', _intervalHours);
+    await prefs.setInt('water_start_hour', _startTime.hour);
+    await prefs.setInt('water_start_min', _startTime.minute);
+    await prefs.setInt('water_end_hour', _endTime.hour);
+    await prefs.setInt('water_end_min', _endTime.minute);
+
+    // Trước khi lên lịch mới, hủy toàn bộ lịch nhắc cũ để tránh trùng lặp
+    await NotificationService.cancelAllNotifications();
+
+    if (_isEnabled) {
+      // SỬA LẠI NỘI DUNG THÔNG BÁO BẮN RA NGAY LẬP TỨC KHI BẤM LƯU:
+      await NotificationService.showInstantNotification(
+        '💧 SaHaBa Health: Đã bật nhắc nhở!',
+        'Trợ lý AI đã lên lịch nhắc bạn uống nước mỗi $_intervalHours giờ. Cùng giữ thói quen tốt nhé! 🎉',
+      );
+
+      // Lấy danh sách các mốc thời gian dạng ["07:00", "09:00", ...]
+      List<String> scheduleTimes = _getScheduleTimes();
+
+      // Duyệt qua từng mốc thời gian để đặt báo thức chạy ngầm
+      for (int i = 0; i < scheduleTimes.length; i++) {
+        List<String> parts = scheduleTimes[i].split(':');
+        int hour = int.parse(parts[0]);
+        int minute = int.parse(parts[1]);
+
+        // SỬA LẠI NỘI DUNG THÔNG BÁO CHẠY NGẦM ĐẾN ĐÚNG GIỜ SẼ HIỆN:
+        await NotificationService.scheduleDailyNotification(
+          id: i + 1,
+          title: '💧 Đã đến giờ uống nước rồi, Hào ơi!',
+          body: 'Nạp ngay 1 ly nước 250ml để cơ thể luôn tràn đầy năng lượng và tỉnh táo làm việc nhé! 🌟',
+          hour: hour,
+          minute: minute,
+        );
+      }
+    }
+  }
 
   List<String> _getScheduleTimes() {
     int startMinutes = _startTime.hour * 60 + _startTime.minute;
@@ -43,7 +109,6 @@ class _WaterNotificationScreenState extends State<WaterNotificationScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-
             // CARD BẬT/TẮT
             Container(
               padding: const EdgeInsets.all(20),
@@ -85,11 +150,12 @@ class _WaterNotificationScreenState extends State<WaterNotificationScreen> {
                     activeColor: Colors.blue,
                     onChanged: (value) {
                       setState(() => _isEnabled = value);
+                      _saveSettings(); // Tự động lưu và cập nhật hệ thống thông báo
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
                           content: Text(value
-                              ? '✅ Đã lưu lịch nhắc nhở uống nước!'
-                              : '🔕 Đã tắt nhắc nhở!'),
+                              ? '✅ Đã lưu lịch nhắc nhở uống nước thật!'
+                              : '🔕 Đã tắt nhắc nhở thành công!'),
                           backgroundColor: value ? Colors.blue : Colors.grey,
                         ),
                       );
@@ -177,17 +243,17 @@ class _WaterNotificationScreenState extends State<WaterNotificationScreen> {
 
                   const SizedBox(height: 24),
 
-                  // NÚT LƯU
+                  // NÚT LƯU CÀI ĐẶT DỮ LIỆU THẬT
                   SizedBox(
                     width: double.infinity,
                     height: 50,
                     child: ElevatedButton.icon(
                       onPressed: _isEnabled
                           ? () {
-                              setState(() {});
+                              _saveSettings(); // Thực thi lưu dữ liệu thật xuống máy
                               ScaffoldMessenger.of(context).showSnackBar(
                                 const SnackBar(
-                                    content: Text('✅ Đã lưu cài đặt nhắc nhở!'),
+                                    content: Text('✅ Đã lưu cấu hình mới thành công!'),
                                     backgroundColor: Colors.blue),
                               );
                             }
@@ -210,7 +276,7 @@ class _WaterNotificationScreenState extends State<WaterNotificationScreen> {
 
             const SizedBox(height: 20),
 
-            // CARD LỊCH NHẮC
+            // CARD LỊCH NHẮC THẬT
             if (_isEnabled) ...[
               Container(
                 padding: const EdgeInsets.all(20),
@@ -233,7 +299,7 @@ class _WaterNotificationScreenState extends State<WaterNotificationScreen> {
                     ]),
                     const SizedBox(height: 4),
                     Text(
-                      'App sẽ nhắc bạn uống nước mỗi $_intervalHours giờ\ntừ ${_startTime.hour.toString().padLeft(2,'0')}:${_startTime.minute.toString().padLeft(2,'0')} đến ${_endTime.hour.toString().padLeft(2,'0')}:${_endTime.minute.toString().padLeft(2,'0')}',
+                      'App sẽ nhắc bạn uống nước mỗi $_intervalHours giờ\ntừ ${_startTime.format(context)} đến ${_endTime.format(context)}',
                       style: TextStyle(color: Colors.blue.shade700, fontSize: 13, height: 1.5),
                     ),
                     const SizedBox(height: 12),
@@ -259,7 +325,7 @@ class _WaterNotificationScreenState extends State<WaterNotificationScreen> {
 
             const SizedBox(height: 20),
 
-            // HƯỚNG DẪN
+            // HƯỚNG DẪN LỢI ÍCH
             Container(
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
@@ -289,7 +355,6 @@ class _WaterNotificationScreenState extends State<WaterNotificationScreen> {
                 ],
               ),
             ),
-
             const SizedBox(height: 30),
           ],
         ),

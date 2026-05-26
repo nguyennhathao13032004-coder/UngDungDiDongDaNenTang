@@ -123,3 +123,4 @@ C:\UngDungDiDongDaNenTang\SaHaBaHealth.Api\obj\Debug\net10.0\ref\SaHaBaHealth.Ap
 C:\UngDungDiDongDaNenTang\SaHaBaHealth.Api\bin\Debug\net10.0\Swashbuckle.AspNetCore.Swagger.dll
 C:\UngDungDiDongDaNenTang\SaHaBaHealth.Api\bin\Debug\net10.0\Swashbuckle.AspNetCore.SwaggerGen.dll
 C:\UngDungDiDongDaNenTang\SaHaBaHealth.Api\bin\Debug\net10.0\Swashbuckle.AspNetCore.SwaggerUI.dll
+C:\UngDungDiDongDaNenTang\SaHaBaHealth.Api\obj\Debug\net10.0\SaHaBaHealth.Api.sourcelink.json

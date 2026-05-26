@@ -12,6 +12,8 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
+        // Đã sửa lại đúng cú pháp cho bản mới:
+        isCoreLibraryDesugaringEnabled = true 
     }
 
     kotlinOptions {
@@ -35,4 +37,9 @@ android {
 
 flutter {
     source = "../.."
+}
+
+// Bổ sung khối lệnh này ở cuối cùng để máy biết đường tải gói hỗ trợ về:
+dependencies {
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 }

@@ -1,13 +1,27 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'screens/splash_screen.dart';
+import 'package:sahaba_health_app/services/notification_service.dart';
+
+// Import 2 thư viện timezone để xử lý múi giờ
+import 'package:timezone/data/latest_all.dart' as tz;
+import 'package:timezone/timezone.dart' as tz; 
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // ==========================================
+  // KHỞI TẠO MÚI GIỜ (ÉP CHUẨN GIỜ VIỆT NAM)
+  // ==========================================
+  tz.initializeTimeZones();
+  tz.setLocalLocation(tz.getLocation('Asia/Ho_Chi_Minh'));
 
+  // Khởi tạo dịch vụ thông báo thật
+  await NotificationService.init();
+  
   await Supabase.initialize(
     url: 'https://beovxpmddidgespeqkyp.supabase.co',
-    anonKey: 'sb_publishable_xkYh3jq5ClXZAq4RGPdw9A_965k0dEH',
+    anonKey: 'sb_publishable_xkYh3jq5ClXZAq4RGPdw9A_965k0dEH', 
   );
 
   runApp(const SaHaHealthApp());
